@@ -12,7 +12,7 @@ class CliApp:
         print("Type note names like C, C#, D, D#, E, F, F#, G, G#, A, A#, B")
         state = self._controller.start_session(self._default_attempts)
         print(f"Session started: {state.session_id}")
-        while state.remaining_attempts > 0:
+        while state.remaining_attempts > 0 and not self._controller.is_game_over():
             self._controller.prepare_prompt()
             self._controller.play_current_prompt()
             guess = self._read_guess()
@@ -25,11 +25,20 @@ class CliApp:
                 f"{status}: target={feedback.target_note}, "
                 f"guess={feedback.guessed_note}, response={feedback.response_ms}ms"
             )
+            if not feedback.correct and self._controller.has_active_manual_piece():
+                self._run_manual_drop_controls()
+            pitch_score, board_score, total_score = self._controller.game_scores()
+            print(f"Scores: pitch={pitch_score}, board={board_score}, total={total_score}")
             print(f"Remaining: {state.remaining_attempts}")
         summary = self._controller.finish_session()
         print(
             f"Session complete: {summary.correct_attempts}/{summary.total_attempts} "
             f"({summary.accuracy:.1%})"
+        )
+        report = self._controller.build_game_report()
+        print(
+            f"Lines={report.total_lines}, Survival={report.survival_seconds}s, "
+            f"Pitch={report.pitch_score}, Board={report.board_score}, Total={report.total_score}"
         )
         self._print_progress_snapshot()
 
@@ -51,3 +60,28 @@ class CliApp:
         for note in NOTES:
             if note in accuracy:
                 print(f"  {note:<2} {accuracy[note]:.1%}")
+
+    def _run_manual_drop_controls(self) -> None:
+        print("Manual drop controls: a=left, d=right, w=rotate, s=soft drop, space=hard drop")
+        while self._controller.has_active_manual_piece():
+            snapshot = self._controller.active_piece_snapshot()
+            if snapshot is not None:
+                kind, x, y, rotation = snapshot
+                print(f"Piece {kind} at x={x}, y={y}, rot={rotation}")
+            command = input("Move: ").strip().lower()
+            if command == "a":
+                self._controller.move_manual_left()
+                continue
+            if command == "d":
+                self._controller.move_manual_right()
+                continue
+            if command == "w":
+                self._controller.rotate_manual()
+                continue
+            if command == "s":
+                self._controller.soft_drop_manual()
+                continue
+            if command in (" ", "h", ""):
+                self._controller.hard_drop_manual()
+                continue
+            print("Use a/d/w/s or space (or enter) for hard drop.")

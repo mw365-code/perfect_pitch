@@ -3,6 +3,7 @@ import unittest
 from domain.tetris_rules import (
     BOARD_HEIGHT,
     BOARD_WIDTH,
+    apply_auto_placement,
     can_spawn,
     clear_full_lines,
     collides,
@@ -11,6 +12,7 @@ from domain.tetris_rules import (
     drop_until_collision,
     is_game_over,
     lock_piece,
+    plan_best_auto_placement,
 )
 
 
@@ -42,6 +44,19 @@ class TetrisRulesTests(unittest.TestCase):
             board[0][x] = 1
             board[1][x] = 1
         self.assertTrue(is_game_over(board, "I"))
+
+    def test_auto_placement_prioritizes_line_clear(self) -> None:
+        board = create_empty_board()
+        board[-1] = [1] * BOARD_WIDTH
+        board[-1][0] = 0
+        board[-1][1] = 0
+        plan = plan_best_auto_placement(board, "O")
+        self.assertIsNotNone(plan)
+        assert plan is not None
+        self.assertGreater(plan.lines_cleared, 0)
+        updated, cleared = apply_auto_placement(board, plan)
+        self.assertEqual(cleared, 1)
+        self.assertEqual(len(updated), BOARD_HEIGHT)
 
 
 if __name__ == "__main__":

@@ -27,6 +27,14 @@ class FallingPiece:
     y: int
 
 
+@dataclass(frozen=True)
+class AutoPlacementPlan:
+    piece: FallingPiece
+    lines_cleared: int
+    aggregate_height_increase: int
+    enclosed_holes: int
+
+
 def create_empty_board() -> Board:
     return [[0 for _ in range(BOARD_WIDTH)] for _ in range(BOARD_HEIGHT)]
 
@@ -73,6 +81,10 @@ def can_spawn(board: Board, kind: str) -> bool:
     return not collides(board, default_spawn(kind))
 
 
+def can_spawn_any(board: Board, kinds: list[str] | tuple[str, ...]) -> bool:
+    return any(can_spawn(board, kind) for kind in kinds)
+
+
 def is_game_over(board: Board, next_piece_kind: str) -> bool:
     spawn_piece = default_spawn(next_piece_kind)
     if collides(board, spawn_piece):
@@ -105,6 +117,77 @@ def drop_until_collision(board: Board, piece: FallingPiece) -> FallingPiece:
         current = next_piece
 
 
+def plan_best_auto_placement(board: Board, kind: str) -> AutoPlacementPlan | None:
+    base_height = aggregate_column_heights(board)
+    candidates: list[AutoPlacementPlan] = []
+    for rotation in range(4):
+        for x in range(-2, BOARD_WIDTH + 2):
+            spawn_piece = FallingPiece(kind=kind, rotation=rotation, x=x, y=SPAWN_ROW)
+            if collides(board, spawn_piece):
+                continue
+            resting_piece = drop_until_collision(board, spawn_piece)
+            if any(cell_y < 0 for _, cell_y in piece_cells(resting_piece)):
+                continue
+            with_piece = lock_piece(board, resting_piece)
+            cleared_board, lines_cleared = clear_full_lines(with_piece)
+            height_delta = aggregate_column_heights(cleared_board) - base_height
+            holes = enclosed_holes(cleared_board)
+            candidates.append(
+                AutoPlacementPlan(
+                    piece=resting_piece,
+                    lines_cleared=lines_cleared,
+                    aggregate_height_increase=height_delta,
+                    enclosed_holes=holes,
+                )
+            )
+    if not candidates:
+        return None
+    return min(
+        candidates,
+        key=lambda item: (
+            0 if item.lines_cleared > 0 else 1,
+            -item.lines_cleared,
+            item.aggregate_height_increase,
+            item.enclosed_holes,
+            item.piece.y,
+            item.piece.x,
+            item.piece.rotation,
+        ),
+    )
+
+
+def apply_auto_placement(board: Board, plan: AutoPlacementPlan) -> tuple[Board, int]:
+    with_piece = lock_piece(board, plan.piece)
+    return clear_full_lines(with_piece)
+
+
+def aggregate_column_heights(board: Board) -> int:
+    total = 0
+    for x in range(BOARD_WIDTH):
+        total += _column_height(board, x)
+    return total
+
+
+def enclosed_holes(board: Board) -> int:
+    holes = 0
+    for x in range(BOARD_WIDTH):
+        seen_block = False
+        for y in range(BOARD_HEIGHT):
+            cell = board[y][x]
+            if cell:
+                seen_block = True
+            elif seen_block:
+                holes += 1
+    return holes
+
+
 def _rotate_clockwise(cell: Cell) -> Cell:
     dx, dy = cell
     return dy, 3 - dx
+
+
+def _column_height(board: Board, x: int) -> int:
+    for y in range(BOARD_HEIGHT):
+        if board[y][x]:
+            return BOARD_HEIGHT - y
+    return 0

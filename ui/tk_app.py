@@ -57,9 +57,12 @@ class TkApp:
     def _next_prompt(self) -> None:
         if self._state is None:
             return
-        if self._state.remaining_attempts <= 0:
+        if self._state.remaining_attempts <= 0 or self._controller.is_game_over():
             summary = self._controller.finish_session()
-            self._status_var.set(f"Session complete: {summary.accuracy:.1%}")
+            report = self._controller.build_game_report()
+            self._status_var.set(
+                f"Session complete: {summary.accuracy:.1%} | total score {report.total_score}"
+            )
             self._remaining_var.set("")
             return
         self._status_var.set("Listen and choose the note")
@@ -78,6 +81,8 @@ class TkApp:
             self._feedback_var.set(
                 f"Wrong: target {feedback.target_note}, guessed {feedback.guessed_note}"
             )
+            while self._controller.has_active_manual_piece():
+                self._controller.hard_drop_manual()
         self._next_prompt()
 
     def _replay_prompt_event(self, _event: tk.Event) -> None:
