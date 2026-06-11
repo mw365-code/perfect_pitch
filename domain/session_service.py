@@ -25,7 +25,9 @@ class SessionService:
         self._session_store.start_session(session_id, _utc_now_iso())
         return session_id
 
-    def next_prompt(self, octave: int = 4) -> Prompt:
+    def next_prompt(self, octave: int = 4, forced_note: str | None = None) -> Prompt:
+        if forced_note is not None:
+            return Prompt(target_note=normalize_note_name(forced_note), octave=octave)
         recent = self._attempt_store.list_recent_attempts()
         note = self._adaptation_service.choose_next_note(self._notes, recent)
         return Prompt(target_note=note, octave=octave)

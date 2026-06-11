@@ -19,6 +19,23 @@ This keeps note training central while turning each mistake into a playable boar
 - **Data storage**: `sqlite3` (built-in, local-first)  
 - **Charts (optional)**: `matplotlib` for progress views
 
+## Python -> Flutter Transition Guidance
+Using `tkinter` is acceptable for a prototype/reference build that validates gameplay rules and learning logic. It is not the right place to invest in long-term UI polish if the production target is Flutter.
+
+Shift to Flutter when these conditions are met:
+1. Core gameplay rules are stable for at least one week:
+   - prompt flow, correct auto-drop, incorrect manual-drop, lock/clear, scoring, game-over.
+2. Logic is UI-agnostic:
+   - domain/controller behavior runs without tkinter-specific assumptions.
+3. Deterministic tests are green:
+   - state machine, placement heuristic, scoring, and end conditions.
+4. Work is becoming UX-heavy:
+   - touch controls, animation smoothness, responsive mobile layout, accessibility.
+
+Practical handoff point:
+- Finish Stage 7 logic tuning in Python.
+- Move Stage 8+ UI-heavy refinement into Flutter/Dart.
+
 ## App Architecture
 Use clear separation between layers:
 - `ui/`: screens, widgets, event handlers

@@ -1,9 +1,24 @@
 from dataclasses import dataclass
 
-BOARD_WIDTH = 10
+from domain.game_constants import CHROMATIC_NOTES, NOTE_TO_TETROMINO
+
+BOARD_WIDTH = 12
 BOARD_HEIGHT = 20
 ROTATION_SYSTEM = "SRS"
 SPAWN_ROW = -2
+NOTE_TO_VALUE: dict[str, int] = {note: index + 1 for index, note in enumerate(CHROMATIC_NOTES)}
+VALUE_TO_NOTE: dict[int, str] = {value: note for note, value in NOTE_TO_VALUE.items()}
+PIECE_KIND_TO_VALUE: dict[str, int] = {
+    "I": 101,
+    "O": 102,
+    "T": 103,
+    "S": 104,
+    "Z": 105,
+    "J": 106,
+    "L": 107,
+}
+VALUE_TO_PIECE_KIND: dict[int, str] = {value: kind for kind, value in PIECE_KIND_TO_VALUE.items()}
+VALUE_TO_PIECE_KIND.update({value: NOTE_TO_TETROMINO[note] for value, note in VALUE_TO_NOTE.items()})
 
 Cell = tuple[int, int]
 Board = list[list[int]]
@@ -33,6 +48,7 @@ class AutoPlacementPlan:
     lines_cleared: int
     aggregate_height_increase: int
     enclosed_holes: int
+    row_fill_score: int
 
 
 def create_empty_board() -> Board:
@@ -92,12 +108,13 @@ def is_game_over(board: Board, next_piece_kind: str) -> bool:
     return collides(board, move(spawn_piece, dx=0, dy=1))
 
 
-def lock_piece(board: Board, piece: FallingPiece) -> Board:
+def lock_piece(board: Board, piece: FallingPiece, cell_value: int | None = None) -> Board:
     result = [row[:] for row in board]
+    value = cell_value if cell_value is not None else PIECE_KIND_TO_VALUE.get(piece.kind, 101)
     for x, y in piece_cells(piece):
         if y < 0:
             continue
-        result[y][x] = 1
+        result[y][x] = value
     return result
 
 
@@ -129,6 +146,7 @@ def plan_best_auto_placement(board: Board, kind: str) -> AutoPlacementPlan | Non
             if any(cell_y < 0 for _, cell_y in piece_cells(resting_piece)):
                 continue
             with_piece = lock_piece(board, resting_piece)
+            row_fill = row_fill_score(board, resting_piece)
             cleared_board, lines_cleared = clear_full_lines(with_piece)
             height_delta = aggregate_column_heights(cleared_board) - base_height
             holes = enclosed_holes(cleared_board)
@@ -138,6 +156,7 @@ def plan_best_auto_placement(board: Board, kind: str) -> AutoPlacementPlan | Non
                     lines_cleared=lines_cleared,
                     aggregate_height_increase=height_delta,
                     enclosed_holes=holes,
+                    row_fill_score=row_fill,
                 )
             )
     if not candidates:
@@ -147,8 +166,9 @@ def plan_best_auto_placement(board: Board, kind: str) -> AutoPlacementPlan | Non
         key=lambda item: (
             0 if item.lines_cleared > 0 else 1,
             -item.lines_cleared,
-            item.aggregate_height_increase,
+            -item.row_fill_score,
             item.enclosed_holes,
+            item.aggregate_height_increase,
             item.piece.y,
             item.piece.x,
             item.piece.rotation,
@@ -156,9 +176,14 @@ def plan_best_auto_placement(board: Board, kind: str) -> AutoPlacementPlan | Non
     )
 
 
-def apply_auto_placement(board: Board, plan: AutoPlacementPlan) -> tuple[Board, int]:
-    with_piece = lock_piece(board, plan.piece)
+def apply_auto_placement(board: Board, plan: AutoPlacementPlan, cell_value: int | None = None) -> tuple[Board, int]:
+    with_piece = lock_piece(board, plan.piece, cell_value=cell_value)
     return clear_full_lines(with_piece)
+
+
+def row_fill_score(board: Board, piece: FallingPiece) -> int:
+    with_piece = lock_piece(board, piece)
+    return sum(sum(1 for cell in row if cell) ** 2 for row in with_piece)
 
 
 def aggregate_column_heights(board: Board) -> int:

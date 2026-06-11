@@ -32,6 +32,7 @@ class SessionState:
     last_auto_plan: AutoPlacementPlan | None = None
     active_piece: FallingPiece | None = None
     pending_attempt: "PendingAttempt | None" = None
+    recent_prompt_families: list[str] | None = None
 
 
 @dataclass(frozen=True)
@@ -50,6 +51,11 @@ class PendingAttempt:
     octave: int
     response_ms: int
     generated_piece: str
+    selected_family: str
+    placement_outcome: str
+    controllable: bool
+    display_note: str | None = None
+    auto_plan: AutoPlacementPlan | None = None
 
 
 @dataclass(frozen=True)

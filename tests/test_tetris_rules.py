@@ -35,7 +35,7 @@ class TetrisRulesTests(unittest.TestCase):
         board = create_empty_board()
         resting_piece = drop_until_collision(board, default_spawn("O"))
         locked = lock_piece(board, resting_piece)
-        occupied = sum(cell for row in locked for cell in row)
+        occupied = sum(1 for row in locked for cell in row if cell)
         self.assertEqual(occupied, 4)
 
     def test_game_over_when_spawn_area_is_blocked(self) -> None:
@@ -57,6 +57,21 @@ class TetrisRulesTests(unittest.TestCase):
         updated, cleared = apply_auto_placement(board, plan)
         self.assertEqual(cleared, 1)
         self.assertEqual(len(updated), BOARD_HEIGHT)
+
+    def test_auto_placement_prefers_horizontal_fill_over_tall_stack(self) -> None:
+        board = create_empty_board()
+        rows = (
+            "..#.....##.#",
+            "#...##...#.#",
+            "#...##.....#",
+            "....#..#....",
+        )
+        for offset, row in enumerate(rows, start=len(rows)):
+            board[-offset] = [1 if cell == "#" else 0 for cell in row]
+        plan = plan_best_auto_placement(board, "T")
+        self.assertIsNotNone(plan)
+        assert plan is not None
+        self.assertGreaterEqual(plan.row_fill_score, 81)
 
 
 if __name__ == "__main__":

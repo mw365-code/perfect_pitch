@@ -1,3 +1,5 @@
+import time
+
 from app.training_controller import TrainingController
 from domain.note_engine import NOTES, normalize_note_name
 
@@ -12,7 +14,8 @@ class CliApp:
         print("Type note names like C, C#, D, D#, E, F, F#, G, G#, A, A#, B")
         state = self._controller.start_session(self._default_attempts)
         print(f"Session started: {state.session_id}")
-        while state.remaining_attempts > 0 and not self._controller.is_game_over():
+        print("Game mode: endless until the board is full.")
+        while not self._controller.is_game_over():
             self._controller.prepare_prompt()
             self._controller.play_current_prompt()
             guess = self._read_guess()
@@ -25,11 +28,13 @@ class CliApp:
                 f"{status}: target={feedback.target_note}, "
                 f"guess={feedback.guessed_note}, response={feedback.response_ms}ms"
             )
-            if not feedback.correct and self._controller.has_active_manual_piece():
-                self._run_manual_drop_controls()
+            if self._controller.has_active_manual_piece():
+                if self._controller.can_control_active_piece():
+                    self._run_manual_drop_controls()
+                else:
+                    self._run_auto_drop()
             pitch_score, board_score, total_score = self._controller.game_scores()
             print(f"Scores: pitch={pitch_score}, board={board_score}, total={total_score}")
-            print(f"Remaining: {state.remaining_attempts}")
         summary = self._controller.finish_session()
         print(
             f"Session complete: {summary.correct_attempts}/{summary.total_attempts} "
@@ -85,3 +90,8 @@ class CliApp:
                 self._controller.hard_drop_manual()
                 continue
             print("Use a/d/w/s or space (or enter) for hard drop.")
+
+    def _run_auto_drop(self) -> None:
+        while self._controller.has_active_manual_piece():
+            self._controller.soft_drop_manual()
+            time.sleep(0.05)

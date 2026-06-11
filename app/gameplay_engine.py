@@ -1,12 +1,13 @@
 import random
-import time
 
-from app.round_models import AutoDropResult, PendingAttempt, SessionState
+from app.round_models import PendingAttempt, SessionState
 from domain.game_constants import visual_mapping_for_note
 from domain.models import Prompt
 from domain.session_service import SessionService
 from domain.tetris_rules import (
     AutoPlacementPlan,
+    FallingPiece,
+    NOTE_TO_VALUE,
     SPAWN_ROW,
     aggregate_column_heights,
     apply_auto_placement,
@@ -37,32 +38,43 @@ class GameplayEngine:
         self._rng = rng
         self._piece_bag: list[str] = []
 
-    def run_correct_answer_auto_drop(self, state: SessionState, note: str) -> AutoDropResult:
+    def begin_correct_drop(self, state: SessionState, note: str, octave: int, response_ms: int) -> None:
         if state.board is None:
             raise RuntimeError("Session has not started")
         mapping = visual_mapping_for_note(note)
         plan = plan_best_auto_placement(state.board, mapping.tetromino_family)
         state.last_auto_plan = plan
         if plan is None:
-            return AutoDropResult(
-                placement_outcome="auto_drop_no_valid_target",
-                selected_family=mapping.tetromino_family,
+            state.pending_attempt = PendingAttempt(
+                target_note=note,
+                guessed_note=note,
+                octave=octave,
+                response_ms=max(response_ms, 0),
                 generated_piece=mapping.tetromino_family,
-                board_height_after=aggregate_column_heights(state.board),
-                lines_cleared_after=state.total_lines_cleared,
+                selected_family=mapping.tetromino_family,
+                placement_outcome="auto_drop_no_valid_target",
+                controllable=False,
+                display_note=note,
             )
-        if self._auto_drop_step_seconds > 0.0:
-            self._sleep_for_auto_drop(plan)
-        updated_board, cleared_lines = apply_auto_placement(state.board, plan)
-        state.board = updated_board
-        state.total_lines_cleared += cleared_lines
-        self.apply_board_scoring(state, cleared_lines)
-        return AutoDropResult(
-            placement_outcome="auto_drop_applied",
-            selected_family=mapping.tetromino_family,
+            state.active_piece = None
+            return
+        state.pending_attempt = PendingAttempt(
+            target_note=note,
+            guessed_note=note,
+            octave=octave,
+            response_ms=max(response_ms, 0),
             generated_piece=mapping.tetromino_family,
-            board_height_after=aggregate_column_heights(state.board),
-            lines_cleared_after=state.total_lines_cleared,
+            selected_family=mapping.tetromino_family,
+            placement_outcome="auto_drop_applied",
+            controllable=False,
+            display_note=note,
+            auto_plan=plan,
+        )
+        state.active_piece = FallingPiece(
+            kind=plan.piece.kind,
+            rotation=plan.piece.rotation,
+            x=plan.piece.x,
+            y=SPAWN_ROW,
         )
 
     def begin_incorrect_drop(
@@ -81,8 +93,17 @@ class GameplayEngine:
             octave=prompt.octave,
             response_ms=max(response_ms, 0),
             generated_piece=generated_piece,
+            selected_family=visual_mapping_for_note(normalized_guess).tetromino_family,
+            placement_outcome="incorrect_manual_locked",
+            controllable=True,
+            display_note=None,
         )
         state.active_piece = default_spawn(generated_piece)
+        while state.active_piece.y < 0:
+            candidate = move(state.active_piece, dx=0, dy=1)
+            if collides(state.board, candidate):
+                break
+            state.active_piece = candidate
         if is_game_over(state.board, generated_piece):
             self.lock_manual_piece(state, spawn_blocked=True)
 
@@ -96,7 +117,9 @@ class GameplayEngine:
         return self._try_move_manual_piece(state, dx=1, dy=0)
 
     def rotate_manual(self, state: SessionState | None, clockwise: bool = True) -> bool:
-        if state is None or state.board is None or state.active_piece is None:
+        if state is None or state.board is None or state.active_piece is None or state.pending_attempt is None:
+            return False
+        if not state.pending_attempt.controllable:
             return False
         candidate = rotate(state.active_piece, clockwise=clockwise)
         if collides(state.board, candidate):
@@ -131,14 +154,19 @@ class GameplayEngine:
         if state is None or state.board is None or state.pending_attempt is None:
             raise RuntimeError("No manual drop to lock")
         pending = state.pending_attempt
+        cell_value = NOTE_TO_VALUE.get(pending.display_note) if pending.display_note is not None else None
         if not spawn_blocked:
-            if state.active_piece is None:
-                raise RuntimeError("No active piece to lock")
-            locked = lock_piece(state.board, state.active_piece)
-            state.board, lines = clear_full_lines(locked)
+            if pending.auto_plan is not None:
+                state.board, lines = apply_auto_placement(state.board, pending.auto_plan, cell_value=cell_value)
+            else:
+                if state.active_piece is None:
+                    lines = 0
+                else:
+                    locked = lock_piece(state.board, state.active_piece, cell_value=cell_value)
+                    state.board, lines = clear_full_lines(locked)
             state.total_lines_cleared += lines
             self.apply_board_scoring(state, lines)
-            outcome = "incorrect_manual_locked"
+            outcome = pending.placement_outcome
         else:
             outcome = "incorrect_spawn_blocked"
         self._session_service.record_attempt(
@@ -149,7 +177,7 @@ class GameplayEngine:
             response_ms=pending.response_ms,
             timbre=self._timbre,
             selected_note=pending.guessed_note,
-            selected_family=visual_mapping_for_note(pending.guessed_note).tetromino_family,
+            selected_family=pending.selected_family,
             generated_piece=pending.generated_piece,
             placement_outcome=outcome,
             board_height_after=aggregate_column_heights(state.board),
@@ -196,14 +224,11 @@ class GameplayEngine:
             self._rng.shuffle(self._piece_bag)
         return self._piece_bag.pop()
 
-    def _sleep_for_auto_drop(self, plan: AutoPlacementPlan) -> None:
-        drop_distance = max(0, plan.piece.y - SPAWN_ROW)
-        for _ in range(drop_distance):
-            time.sleep(self._auto_drop_step_seconds)
-
     @staticmethod
     def _try_move_manual_piece(state: SessionState | None, dx: int, dy: int) -> bool:
-        if state is None or state.board is None or state.active_piece is None:
+        if state is None or state.board is None or state.active_piece is None or state.pending_attempt is None:
+            return False
+        if not state.pending_attempt.controllable:
             return False
         candidate = move(state.active_piece, dx=dx, dy=dy)
         if collides(state.board, candidate):
