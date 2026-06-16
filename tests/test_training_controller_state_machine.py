@@ -102,6 +102,7 @@ class _FakeToneGenerator:
         octave: int,
         duration_seconds: float,
         a4_hz: float = 440.0,
+        timbre: str = "sine",
     ) -> Path:
         return Path("/tmp/fake_note.wav")
 class _FakeAudioPlayer:

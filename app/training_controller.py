@@ -82,6 +82,7 @@ class TrainingController:
             prompt.target_note,
             prompt.octave,
             duration_seconds=self._tone_seconds,
+            timbre=self._timbre,
         )
         try:
             self._audio_player.play(tone_file)
